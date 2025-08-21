@@ -210,10 +210,10 @@ using UnderlyingProblemShape = typename ProblemShape::UnderlyingProblemShape;
 
 template <typename Gemm>
 static xla::ffi::Error BlackwellGroupGemmBlockScaledImpl(
-    cudaStream_t stream, const GemmElementA **A, const GemmElementB **B,
-    const GemmElementSF **ASF, const GemmElementSF **BSF,
-    UnderlyingProblemShape *Problem_Sizes, int32_t Num_Groups,
-    StrideA *Stride_A, StrideB *Stride_B, StrideD *Stride_D,
+    cudaStream_t stream, int32_t device, const GemmElementA **A,
+    const GemmElementB **B, const GemmElementSF **ASF,
+    const GemmElementSF **BSF, UnderlyingProblemShape *Problem_Sizes,
+    int32_t Num_Groups, StrideA *Stride_A, StrideB *Stride_B, StrideD *Stride_D,
     LayoutSFA *SFA_Layout, LayoutSFB *SFB_Layout, GemmElementD **D,
     uint8_t *cutlass_workspace) {
   typename Gemm::Arguments arguments;
@@ -230,24 +230,20 @@ static xla::ffi::Error BlackwellGroupGemmBlockScaledImpl(
   fusion_args.dBeta = {_0{}, _0{}, 0};
 
   cutlass::KernelHardwareInfo hw_info;
-  // Change device_id to another value if you are running on a machine with
-  // multiple GPUs and wish to use a GPU other than that with device ID 0.
-  hw_info.device_id = 0;
-  hw_info.sm_count =
-      min(cutlass::KernelHardwareInfo::query_device_multiprocessor_count(0),
-          INT_MAX /*max sms*/);
-
-#if 0
-if (size<0>(typename Gemm::GemmKernel::CollectiveMainloop::AtomThrShapeMNK{}) == 2 &&
-    (options.cluster_shape.x < 2 || options.cluster_shape_fallback.x < 2)) {
-  std::string err = "Error: MMA2SMConfig kernel config needs cluster_dim.x >= 2";
-  std::cerr << err << "\n";
-  return xla::ffi::Error(XLA_FFI_Error_Code_INTERNAL, err);
-}
-#endif
+  hw_info.device_id = device;
+  hw_info.sm_count = GetDeviceSmCount(device);
 
   hw_info.cluster_shape = dim3(2, 1, 1);
   hw_info.cluster_shape_fallback = dim3(2, 1, 1);
+
+  if (size<0>(
+          typename Gemm::GemmKernel::CollectiveMainloop::AtomThrShapeMNK{}) ==
+          2 &&
+      (hw_info.cluster_shape.x < 2 || hw_info.cluster_shape_fallback.x < 2)) {
+    std::string err =
+        "Error: MMA2SMConfig kernel config needs cluster_dim.x >= 2";
+    return xla::ffi::Error(XLA_FFI_Error_Code_INTERNAL, err);
+  }
 
   typename Gemm::GemmKernel::TileSchedulerArguments scheduler;
   scheduler.raster_order =
@@ -332,12 +328,12 @@ __global__ void BlackwellGroupGemmBlockScaled_PrepareWorkspace(
 }
 
 xla::ffi::Error BlackwellGroupGemmBlockScaled(
-    cudaStream_t stream, xla::ffi::AnyBuffer A, xla::ffi::AnyBuffer B,
-    xla::ffi::AnyBuffer A_scales, xla::ffi::AnyBuffer B_scales,
-    xla::ffi::AnyBuffer Problem_Sizes, xla::ffi::AnyBuffer Group_Offsets,
-    xla::ffi::Result<xla::ffi::AnyBuffer> D,
+    cudaStream_t stream, int32_t device, xla::ffi::AnyBuffer A,
+    xla::ffi::AnyBuffer B, xla::ffi::AnyBuffer A_scales,
+    xla::ffi::AnyBuffer B_scales, xla::ffi::AnyBuffer Problem_Sizes,
+    xla::ffi::AnyBuffer Group_Offsets, xla::ffi::Result<xla::ffi::AnyBuffer> D,
     xla::ffi::Result<xla::ffi::AnyBuffer> Workspace,
-    xla::ffi::Result<xla::ffi::AnyBuffer> CutlassWorkspace) {
+    xla::ffi::Result<xla::ffi::AnyBuffer> CutlassWorkspace, bool use_2sm) {
   const int32_t num_groups = Problem_Sizes.dimensions()[0];
 
   WorkspaceBuffer wkrspc(reinterpret_cast<uint8_t *>(Workspace->untyped_data()),
@@ -396,16 +392,24 @@ xla::ffi::Error BlackwellGroupGemmBlockScaled(
                                cudaGetErrorString(last_error));
   }
 
-  return BlackwellGroupGemmBlockScaledImpl<Gemm>(
-      stream, Aptrs, Bptrs, SFAptrs, SFBptrs, Problem_Shape_, num_groups,
-      Stride_A_, Stride_B_, Stride_D_, SFA_Layout_, SFB_Layout_, Dptrs,
-      cutlass_workspace);
+  if (use_2sm) {
+    return BlackwellGroupGemmBlockScaledImpl<Gemm2SM>(
+        stream, device, Aptrs, Bptrs, SFAptrs, SFBptrs, Problem_Shape_,
+        num_groups, Stride_A_, Stride_B_, Stride_D_, SFA_Layout_, SFB_Layout_,
+        Dptrs, cutlass_workspace);
+  } else {
+    return BlackwellGroupGemmBlockScaledImpl<Gemm1SM>(
+        stream, device, Aptrs, Bptrs, SFAptrs, SFBptrs, Problem_Shape_,
+        num_groups, Stride_A_, Stride_B_, Stride_D_, SFA_Layout_, SFB_Layout_,
+        Dptrs, cutlass_workspace);
+  }
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     BlackwellGroupGemmBlockScaledHandler, BlackwellGroupGemmBlockScaled,
     xla::ffi::Ffi::Bind()
         .Ctx<xla::ffi::PlatformStream<cudaStream_t>>()
+        .Ctx<xla::ffi::DeviceOrdinal>()
         .Arg<xla::ffi::AnyBuffer>() // A fp4
         .Arg<xla::ffi::AnyBuffer>() // B fp4
         .Arg<xla::ffi::AnyBuffer>() // A_scales fp8
@@ -415,5 +419,5 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<xla::ffi::AnyBuffer>() // D f16
         .Ret<xla::ffi::AnyBuffer>() // Workspace buffer
         .Ret<xla::ffi::AnyBuffer>() // Cutlass worksapce buffer
-    ,
+        .Attr<bool>("use_2sm"),
     {xla::ffi::Traits::kCmdBufferCompatible});

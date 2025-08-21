@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 
-def blackwell_group_gemm_block_scaled(a, b, asf, bsf, group_sizes):
+def blackwell_group_gemm_block_scaled(a, b, asf, bsf, group_sizes, *, use_2sm: bool):
     """fp4 blocked scaled group gemm.
 
     A/B are packed tensors consisting of multiple groups of activations and weights.
@@ -44,5 +44,5 @@ def blackwell_group_gemm_block_scaled(a, b, asf, bsf, group_sizes):
             jax.ShapeDtypeStruct((cutlass_workspace_size,), dtype=jnp.uint8),
         ),
     )
-    d, workspace, cutlass_wrksapce = call(a, b, asf, bsf, problem_shapes, group_offsets)
+    d, workspace, cutlass_wrksapce = call(a, b, asf, bsf, problem_shapes, group_offsets, use_2sm=use_2sm)
     return d

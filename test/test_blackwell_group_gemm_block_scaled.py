@@ -24,7 +24,13 @@ from tensor import (
         pytest.param((32, 32 * 1024, int(1.5 * 1024), 2048), id="E32-M32768-N1536-K2048"),
     ],
 )
-def test_blackwell_group_gemm_block_scaled(problem_size):
+@pytest.mark.parametrize(
+    "use_2sm",
+    [
+        pytest.param(False, id="1SM"),
+        pytest.param(True, id="2SM"),
+    ])
+def test_blackwell_group_gemm_block_scaled(problem_size, use_2sm):
     def ceil_div(a, b):
         return (a + b - 1) // b
 
@@ -103,9 +109,9 @@ def test_blackwell_group_gemm_block_scaled(problem_size):
     tensor_d_device = jnp.concatenate([x[4] for x in tensors_abd], axis=dm_axis)
 
     # Call our kernel!
-    gemm = jax.jit(cf.blackwell_group_gemm_block_scaled)
+    gemm = jax.jit(cf.blackwell_group_gemm_block_scaled, static_argnames=["use_2sm"])
     tensor_d_device = gemm(
-        tensor_a_device, tensor_b_device, tensor_sfa_device, tensor_sfb_device, group_sizes
+        tensor_a_device, tensor_b_device, tensor_sfa_device, tensor_sfb_device, group_sizes, use_2sm=use_2sm
     )
 
     d_ref = []

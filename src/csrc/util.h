@@ -31,7 +31,7 @@ public:
   }
 
   template <class T, size_t Align = 32> T *allocate(size_t n) {
-    static_assert(Align > std::alignment_of<T>(), "Alignment too small");
+    static_assert(Align >= std::alignment_of<T>(), "Alignment too small");
     static_assert(Align % std::alignment_of<T>() == 0,
                   "Type must be minimally aligned.");
     uint8_t *p = allocate_raw(sizeof(T) * n, Align);
