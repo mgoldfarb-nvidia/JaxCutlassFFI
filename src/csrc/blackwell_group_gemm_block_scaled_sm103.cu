@@ -51,52 +51,55 @@
 /// CUTLASS DEFINITIONS ///
 
 // From
-// https://github.com/NVIDIA/cutlass/blob/main/examples/75_blackwell_grouped_gemm/75_blackwell_grouped_gemm_block_scaled.cu
+// https://github.com/NVIDIA/cutlass/blob/main/examples/90_sm103_fp4_ultra_grouped_gemm/90_sm103_fp4_ultra_grouped_gemm.cu
 
 using namespace cute;
 
 using ProblemShape =
-    cutlass::gemm::GroupProblemShape<Shape<int, int, int>>; // <M,N,K> per
-                                                            // group
+    cutlass::gemm::GroupProblemShape<Shape<int, int, int>>;  // <M,N,K> per
+                                                             // group
 using ElementInput =
-    cutlass::float_e2m1_t; // Element type for Input matrix operands
-using ElementSF = cutlass::float_e4m3_t; // Element type for SF matrix operands
-using ElementC = cutlass::half_t;        // Element type for C matrix operands
-using ElementD = cutlass::half_t;        // Element type for D matrix operands
+    cutlass::float_e2m1_t;  // Element type for Input matrix operands
+using ElementSF =
+    cutlass::float_ue4m3_t;        // Element type for SF matrix operands
+using ElementC = cutlass::half_t;  // Element type for C matrix operands
 
+/////////////////////////////////////////////////////////////////////////////////////////////////
+/// GEMM kernel configurations
+/////////////////////////////////////////////////////////////////////////////////////////////////
 // A matrix configuration
-using ElementA =
-    cutlass::nv_float4_t<ElementInput>;    // Element type for A matrix operand
-using LayoutA = cutlass::layout::RowMajor; // Layout type for A matrix operand
+using ElementA = ElementInput;              // Element type for A matrix operand
+using LayoutA = cutlass::layout::RowMajor;  // Layout type for A matrix operand
 constexpr int AlignmentA =
-    32; // Alignment of A matrix in units of elements (up to 16 bytes)
+    32;  // Alignment of A matrix in units of elements (up to 16 bytes)
 
 // B matrix configuration
-using ElementB =
-    cutlass::nv_float4_t<ElementInput>; // Element type for B matrix operand
+using ElementB = ElementInput;  // Element type for B matrix operand
 using LayoutB =
-    cutlass::layout::ColumnMajor; // Layout type for B matrix operand
+    cutlass::layout::ColumnMajor;  // Layout type for B matrix operand
 constexpr int AlignmentB =
-    32; // Alignment of A matrix in units of elements (up to 16 bytes)
-
-constexpr int InputSFVectorSize = 16;
+    32;  // Alignment of A matrix in units of elements (up to 16 bytes)
 
 // C/D matrix configuration
+using ElementD = ElementC;  // Element type for D matrix operands
 using LayoutC =
-    cutlass::layout::RowMajor; // Layout type for C and D matrix operands
-using LayoutD = LayoutC;
-constexpr int AlignmentC = 128 / cutlass::sizeof_bits<ElementC>::value;
+    cutlass::layout::RowMajor;  // Layout type for C and D matrix operands
+constexpr int AlignmentC =
+    128 /
+    cutlass::sizeof_bits<ElementC>::value;  // Alignment of C matrix in units of
+                                            // elements (up to 16 bytes)
 constexpr int AlignmentD =
     128 /
-    cutlass::sizeof_bits<ElementD>::value; // Alignment of D matrix in units of
-                                           // elements (up to 16 bytes)
-using ElementAccumulator = float; // Element type for internal accumulation
+    cutlass::sizeof_bits<ElementD>::value;  // Alignment of D matrix in units of
+                                            // elements (up to 16 bytes)
+using ElementAccumulator = float;  // Element type for internal accumulation
 
 // using ElementD = cutlass::float_e2m1_t; // Enable for SF Output          //
 // Element type for D matrix operands
 
 using ElementSFD =
-    cutlass::float_ue4m3_t; // Element type for SF Output operands
+    cutlass::float_ue4m3_t;  // Element type for SF Output operands
+constexpr int InputSFVectorSize = 16;
 constexpr int OutputSFVectorSize = 16;
 using FusionOperation =
     cutlass::epilogue::fusion::LinCombEltActBlockScaleFactor<
@@ -104,51 +107,53 @@ using FusionOperation =
         ElementAccumulator, ElementSFD, LayoutC, ElementC>;
 
 // Core kernel configurations
-using ArchTag = cutlass::arch::Sm100; // Tag indicating the minimum SM that
-                                      // supports the intended feature
-using EpilogueOperatorClass =
-    cutlass::arch::OpClassTensorOp; // Epilogue Operator class tag
-using MainloopOperatorClass =
-    cutlass::arch::OpClassBlockScaledTensorOp; // Mainloop Operator class tag
+using ArchTag = cutlass::arch::Sm103;  // Tag indicating the minimum SM that
+                                       // supports the intended feature
+using OperatorClass =
+    cutlass::arch::OpClassBlockScaledTensorOp;  // Operator class tag
 using StageCountType =
-    cutlass::gemm::collective::StageCountAuto; // Stage count maximized based
-                                               // on the tile size
+    cutlass::gemm::collective::StageCountAuto;  // Stage count maximized based
+                                                // on the tile size
 
 // Runtime Cluster Shape
-using ClusterShape = Shape<int32_t, int32_t, _1>;
+using ClusterShape = cute::Shape<int, int, cute::_1>;
 
 // Different configs for 1SM and 2SM MMA kernel
 struct MMA1SMConfig {
-  using MmaTileShape = Shape<_128, _256, _256>;
-  using KernelSchedule =
-      cutlass::gemm::KernelPtrArrayTmaWarpSpecialized1SmNvf4Sm100; // Kernel to
-                                                                   // launch
+  using MmaTileShape = cute::Shape<cute::_128, cute::_256, Int<768>>;
+  using KernelSchedule = cutlass::gemm::
+      KernelPtrArrayTmaWarpSpecialized1SmBlockScaledMxNvf4UltraVs16Sm103;  // Kernel
+                                                                           // to
+                                                                           // launch
   using EpilogueSchedule =
-      cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm; // Epilogue to launch
+      cutlass::epilogue::PtrArrayNoSmemWarpSpecialized1Sm;  // Epilogue to
+                                                            // launch
 };
 
 struct MMA2SMConfig {
-  using MmaTileShape = Shape<_256, _256, _256>;
-  using KernelSchedule =
-      cutlass::gemm::KernelPtrArrayTmaWarpSpecialized2SmNvf4Sm100; // Kernel to
-                                                                   // launch
+  using MmaTileShape = cute::Shape<cute::_256, cute::_256, Int<768>>;
+  using KernelSchedule = cutlass::gemm::
+      KernelPtrArrayTmaWarpSpecialized2SmBlockScaledMxNvf4UltraVs16Sm103;  // Kernel
+                                                                           // to
+                                                                           // launch
   using EpilogueSchedule =
-      cutlass::epilogue::PtrArrayTmaWarpSpecialized2Sm; // Epilogue to launch
+      cutlass::epilogue::PtrArrayNoSmemWarpSpecialized2Sm;  // Epilogue to
+                                                            // launch
 };
 
 using CollectiveEpilogue =
     typename cutlass::epilogue::collective::CollectiveBuilder<
-        ArchTag, EpilogueOperatorClass, typename MMA1SMConfig::MmaTileShape,
-        ClusterShape, Shape<_128, _64>, ElementAccumulator, ElementAccumulator,
-        ElementC, LayoutC *, AlignmentC, ElementD, LayoutD *, AlignmentD,
-        typename MMA1SMConfig::EpilogueSchedule
+        ArchTag, OperatorClass, typename MMA1SMConfig::MmaTileShape,
+        ClusterShape, cutlass::epilogue::collective::EpilogueTileAuto,
+        ElementAccumulator, ElementAccumulator, ElementC, LayoutC*, AlignmentC,
+        ElementD, LayoutC*, AlignmentD, typename MMA1SMConfig::EpilogueSchedule
         // , FusionOperation  // Enable for SF Output
         >::CollectiveOp;
 using CollectiveMainloop =
     typename cutlass::gemm::collective::CollectiveBuilder<
-        ArchTag, MainloopOperatorClass, ElementA, LayoutA *, AlignmentA,
-        ElementB, LayoutB *, AlignmentB, ElementAccumulator,
-        typename MMA1SMConfig::MmaTileShape, ClusterShape,
+        ArchTag, OperatorClass, cute::tuple<ElementA, ElementSF>, LayoutA*,
+        AlignmentA, cute::tuple<ElementB, ElementSF>, LayoutB*, AlignmentB,
+        ElementAccumulator, typename MMA1SMConfig::MmaTileShape, ClusterShape,
         cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
             sizeof(typename CollectiveEpilogue::SharedStorage))>,
         typename MMA1SMConfig::KernelSchedule>::CollectiveOp;
@@ -160,19 +165,19 @@ using Gemm = Gemm1SM;
 
 using CollectiveEpilogue2SM =
     typename cutlass::epilogue::collective::CollectiveBuilder<
-        ArchTag, EpilogueOperatorClass, typename MMA2SMConfig::MmaTileShape,
-        ClusterShape, Shape<_128, _64>, ElementAccumulator, ElementAccumulator,
-        ElementC, LayoutC *, AlignmentC, ElementD, LayoutD *, AlignmentD,
-        typename MMA2SMConfig::EpilogueSchedule
+        ArchTag, OperatorClass, typename MMA2SMConfig::MmaTileShape,
+        ClusterShape, cutlass::epilogue::collective::EpilogueTileAuto,
+        ElementAccumulator, ElementAccumulator, ElementC, LayoutC*, AlignmentC,
+        ElementD, LayoutC*, AlignmentD, typename MMA2SMConfig::EpilogueSchedule
         // , FusionOperation  // Enable for SF Output
         >::CollectiveOp;
 using CollectiveMainloop2SM =
     typename cutlass::gemm::collective::CollectiveBuilder<
-        ArchTag, MainloopOperatorClass, ElementA, LayoutA *, AlignmentA,
-        ElementB, LayoutB *, AlignmentB, ElementAccumulator,
-        typename MMA2SMConfig::MmaTileShape, ClusterShape,
+        ArchTag, OperatorClass, cute::tuple<ElementA, ElementSF>, LayoutA*,
+        AlignmentA, cute::tuple<ElementB, ElementSF>, LayoutB*, AlignmentB,
+        ElementAccumulator, typename MMA2SMConfig::MmaTileShape, ClusterShape,
         cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
-            sizeof(typename CollectiveEpilogue::SharedStorage))>,
+            sizeof(typename CollectiveEpilogue2SM::SharedStorage))>,
         typename MMA2SMConfig::KernelSchedule>::CollectiveOp;
 using GemmKernel2SM =
     cutlass::gemm::kernel::GemmUniversal<ProblemShape, CollectiveMainloop2SM,
@@ -210,12 +215,12 @@ using UnderlyingProblemShape = typename ProblemShape::UnderlyingProblemShape;
 
 template <typename Gemm>
 static xla::ffi::Error BlackwellGroupGemmBlockScaledImpl(
-    cudaStream_t stream, int32_t device, const GemmElementA **A,
-    const GemmElementB **B, const GemmElementSF **ASF,
-    const GemmElementSF **BSF, UnderlyingProblemShape *Problem_Sizes,
-    int32_t Num_Groups, StrideA *Stride_A, StrideB *Stride_B, StrideD *Stride_D,
-    LayoutSFA *SFA_Layout, LayoutSFB *SFB_Layout, GemmElementD **D,
-    uint8_t *cutlass_workspace) {
+    cudaStream_t stream, int32_t device, const GemmElementA** A,
+    const GemmElementB** B, const GemmElementSF** ASF,
+    const GemmElementSF** BSF, UnderlyingProblemShape* Problem_Sizes,
+    int32_t Num_Groups, StrideA* Stride_A, StrideB* Stride_B, StrideD* Stride_D,
+    LayoutSFA* SFA_Layout, LayoutSFB* SFB_Layout, GemmElementD** D,
+    uint8_t* cutlass_workspace) {
   typename Gemm::Arguments arguments;
 
   // Only single value for alpha and beta
@@ -267,32 +272,32 @@ static xla::ffi::Error BlackwellGroupGemmBlockScaledImpl(
 
   cudaError_t last_error = cudaGetLastError();
   if (last_error != cudaSuccess) {
-    return xla::ffi::Error(XLA_FFI_Error_Code_INTERNAL,
-                           std::string("CUDA error: ") +
-                               cudaGetErrorString(last_error));
+    return xla::ffi::Error(
+        XLA_FFI_Error_Code_INTERNAL,
+        std::string("CUDA error: ") + cudaGetErrorString(last_error));
   }
   return xla::ffi::Error::Success();
 }
 
 __global__ void BlackwellGroupGemmBlockScaled_PrepareWorkspace(
-    const GemmElementA *A, const GemmElementB *B, const GemmElementSF *ASF,
-    const GemmElementSF *BSF, GemmElementD *D,
-    const UnderlyingProblemShape *problem_sizes, const int32_t *group_offsets,
-    int32_t num_groups, const GemmElementA **Aptrs, const GemmElementB **Bptrs,
-    const GemmElementSF **ASFptrs, const GemmElementSF **BSFptrs,
-    GemmElementD **Dptrs, StrideA *Strides_A, StrideB *Strides_B,
-    StrideD *Strides_D, LayoutSFA *Layouts_SFA, LayoutSFB *Layouts_SFB) {
+    const GemmElementA* A, const GemmElementB* B, const GemmElementSF* ASF,
+    const GemmElementSF* BSF, GemmElementD* D,
+    const UnderlyingProblemShape* problem_sizes, const int32_t* group_offsets,
+    int32_t num_groups, const GemmElementA** Aptrs, const GemmElementB** Bptrs,
+    const GemmElementSF** ASFptrs, const GemmElementSF** BSFptrs,
+    GemmElementD** Dptrs, StrideA* Strides_A, StrideB* Strides_B,
+    StrideD* Strides_D, LayoutSFA* Layouts_SFA, LayoutSFB* Layouts_SFB) {
   // Extract the pointer for the start of each sub-matrix in the packed A, B and
   // D Strides and layout also computed here.
   unsigned group_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (group_idx < num_groups) {
-    const auto problem_size = problem_sizes[group_idx]; // (m, n, k)
+    const auto problem_size = problem_sizes[group_idx];  // (m, n, k)
     const int32_t M = cute::get<0>(problem_size);
     const int32_t N = cute::get<1>(problem_size);
     const int32_t K = cute::get<2>(problem_size);
     const int32_t offset = group_offsets[group_idx];
-    Aptrs[group_idx] = A + offset * K / 2;        // div by 2 because sub byte!
-    Bptrs[group_idx] = B + group_idx * K * N / 2; // div by 2 because sub byte!
+    Aptrs[group_idx] = A + offset * K / 2;         // div by 2 because sub byte!
+    Bptrs[group_idx] = B + group_idx * K * N / 2;  // div by 2 because sub byte!
     Dptrs[group_idx] = D + offset * N;
 
     ASFptrs[group_idx] = ASF + offset * K / InputSFVectorSize;
@@ -327,7 +332,7 @@ __global__ void BlackwellGroupGemmBlockScaled_PrepareWorkspace(
   }
 }
 
-xla::ffi::Error BlackwellGroupGemmBlockScaled(
+xla::ffi::Error BlackwellGroupGemmBlockScaledSm103(
     cudaStream_t stream, int32_t device, xla::ffi::AnyBuffer A,
     xla::ffi::AnyBuffer B, xla::ffi::AnyBuffer A_scales,
     xla::ffi::AnyBuffer B_scales, xla::ffi::AnyBuffer Problem_Sizes,
@@ -336,25 +341,23 @@ xla::ffi::Error BlackwellGroupGemmBlockScaled(
     xla::ffi::Result<xla::ffi::AnyBuffer> CutlassWorkspace, bool use_2sm) {
   const int32_t num_groups = Problem_Sizes.dimensions()[0];
 
-  WorkspaceBuffer wkrspc(reinterpret_cast<uint8_t *>(Workspace->untyped_data()),
+  WorkspaceBuffer wkrspc(reinterpret_cast<uint8_t*>(Workspace->untyped_data()),
                          Workspace->dimensions()[0]);
 
-  const GemmElementA **Aptrs =
-      wkrspc.allocate<const GemmElementA *>(num_groups);
-  const GemmElementB **Bptrs =
-      wkrspc.allocate<const GemmElementB *>(num_groups);
-  const GemmElementSF **SFAptrs =
-      wkrspc.allocate<const GemmElementSF *>(num_groups);
-  const GemmElementSF **SFBptrs =
-      wkrspc.allocate<const GemmElementSF *>(num_groups);
-  GemmElementD **Dptrs = wkrspc.allocate<GemmElementD *>(num_groups);
+  const GemmElementA** Aptrs = wkrspc.allocate<const GemmElementA*>(num_groups);
+  const GemmElementB** Bptrs = wkrspc.allocate<const GemmElementB*>(num_groups);
+  const GemmElementSF** SFAptrs =
+      wkrspc.allocate<const GemmElementSF*>(num_groups);
+  const GemmElementSF** SFBptrs =
+      wkrspc.allocate<const GemmElementSF*>(num_groups);
+  GemmElementD** Dptrs = wkrspc.allocate<GemmElementD*>(num_groups);
 
-  StrideA *Stride_A_ = wkrspc.allocate<StrideA>(num_groups);
-  StrideB *Stride_B_ = wkrspc.allocate<StrideB>(num_groups);
-  StrideD *Stride_D_ = wkrspc.allocate<StrideD>(num_groups);
+  StrideA* Stride_A_ = wkrspc.allocate<StrideA>(num_groups);
+  StrideB* Stride_B_ = wkrspc.allocate<StrideB>(num_groups);
+  StrideD* Stride_D_ = wkrspc.allocate<StrideD>(num_groups);
 
-  LayoutSFA *SFA_Layout_ = wkrspc.allocate<LayoutSFA>(num_groups);
-  LayoutSFB *SFB_Layout_ = wkrspc.allocate<LayoutSFB>(num_groups);
+  LayoutSFA* SFA_Layout_ = wkrspc.allocate<LayoutSFA>(num_groups);
+  LayoutSFB* SFB_Layout_ = wkrspc.allocate<LayoutSFB>(num_groups);
 
   if (Aptrs == nullptr || Bptrs == nullptr || SFAptrs == nullptr ||
       SFBptrs == nullptr || Dptrs == nullptr || Stride_A_ == nullptr ||
@@ -364,10 +367,10 @@ xla::ffi::Error BlackwellGroupGemmBlockScaled(
                            "Workspace buffer allocation is too small.");
   }
 
-  uint8_t *cutlass_workspace =
-      reinterpret_cast<uint8_t *>(CutlassWorkspace->untyped_data());
-  UnderlyingProblemShape *Problem_Shape_ =
-      reinterpret_cast<UnderlyingProblemShape *>(Problem_Sizes.untyped_data());
+  uint8_t* cutlass_workspace =
+      reinterpret_cast<uint8_t*>(CutlassWorkspace->untyped_data());
+  UnderlyingProblemShape* Problem_Shape_ =
+      reinterpret_cast<UnderlyingProblemShape*>(Problem_Sizes.untyped_data());
 
   // Fill out the workspace for this kernel. Each thread processes one of the
   // problem blocks.
@@ -376,20 +379,20 @@ xla::ffi::Error BlackwellGroupGemmBlockScaled(
       (num_groups + threads_per_block - 1) / threads_per_block;
   BlackwellGroupGemmBlockScaled_PrepareWorkspace<<<nblocks, threads_per_block,
                                                    0, stream>>>(
-      reinterpret_cast<const GemmElementA *>(A.untyped_data()),
-      reinterpret_cast<const GemmElementB *>(B.untyped_data()),
-      reinterpret_cast<const GemmElementSF *>(A_scales.untyped_data()),
-      reinterpret_cast<const GemmElementSF *>(B_scales.untyped_data()),
-      reinterpret_cast<GemmElementD *>(D->untyped_data()), Problem_Shape_,
-      reinterpret_cast<const int32_t *>(Group_Offsets.untyped_data()),
+      reinterpret_cast<const GemmElementA*>(A.untyped_data()),
+      reinterpret_cast<const GemmElementB*>(B.untyped_data()),
+      reinterpret_cast<const GemmElementSF*>(A_scales.untyped_data()),
+      reinterpret_cast<const GemmElementSF*>(B_scales.untyped_data()),
+      reinterpret_cast<GemmElementD*>(D->untyped_data()), Problem_Shape_,
+      reinterpret_cast<const int32_t*>(Group_Offsets.untyped_data()),
       num_groups, Aptrs, Bptrs, SFAptrs, SFBptrs, Dptrs, Stride_A_, Stride_B_,
       Stride_D_, SFA_Layout_, SFB_Layout_);
 
   cudaError_t last_error = cudaGetLastError();
   if (last_error != cudaSuccess) {
-    return xla::ffi::Error(XLA_FFI_Error_Code_INTERNAL,
-                           std::string("CUDA error: ") +
-                               cudaGetErrorString(last_error));
+    return xla::ffi::Error(
+        XLA_FFI_Error_Code_INTERNAL,
+        std::string("CUDA error: ") + cudaGetErrorString(last_error));
   }
 
   if (use_2sm) {
@@ -406,18 +409,19 @@ xla::ffi::Error BlackwellGroupGemmBlockScaled(
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    BlackwellGroupGemmBlockScaledHandler, BlackwellGroupGemmBlockScaled,
+    BlackwellGroupGemmBlockScaledSm103Handler,
+    BlackwellGroupGemmBlockScaledSm103,
     xla::ffi::Ffi::Bind()
         .Ctx<xla::ffi::PlatformStream<cudaStream_t>>()
         .Ctx<xla::ffi::DeviceOrdinal>()
-        .Arg<xla::ffi::AnyBuffer>() // A fp4
-        .Arg<xla::ffi::AnyBuffer>() // B fp4
-        .Arg<xla::ffi::AnyBuffer>() // A_scales fp8
-        .Arg<xla::ffi::AnyBuffer>() // B_scales fp8
-        .Arg<xla::ffi::AnyBuffer>() // Group_Offsets s32[G+1]
-        .Arg<xla::ffi::AnyBuffer>() // Problem_Sizes s32[G][3]
-        .Ret<xla::ffi::AnyBuffer>() // D f16
-        .Ret<xla::ffi::AnyBuffer>() // Workspace buffer
-        .Ret<xla::ffi::AnyBuffer>() // Cutlass worksapce buffer
+        .Arg<xla::ffi::AnyBuffer>()  // A fp4
+        .Arg<xla::ffi::AnyBuffer>()  // B fp4
+        .Arg<xla::ffi::AnyBuffer>()  // A_scales fp8
+        .Arg<xla::ffi::AnyBuffer>()  // B_scales fp8
+        .Arg<xla::ffi::AnyBuffer>()  // Group_Offsets s32[G+1]
+        .Arg<xla::ffi::AnyBuffer>()  // Problem_Sizes s32[G][3]
+        .Ret<xla::ffi::AnyBuffer>()  // D f16
+        .Ret<xla::ffi::AnyBuffer>()  // Workspace buffer
+        .Ret<xla::ffi::AnyBuffer>()  // Cutlass worksapce buffer
         .Attr<bool>("use_2sm"),
     {xla::ffi::Traits::kCmdBufferCompatible});

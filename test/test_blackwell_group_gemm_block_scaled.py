@@ -21,7 +21,9 @@ from tensor import (
     "problem_size",
     [
         pytest.param((4, 4 * 256, 256, 512), id="E4-M1024-N256-K512"),
-        pytest.param((32, 32 * 1024, int(1.5 * 1024), 2048), id="E32-M32768-N1536-K2048"),
+        pytest.param(
+            (32, 32 * 1024, int(1.5 * 1024), 2048), id="E32-M32768-N1536-K2048"
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -29,8 +31,16 @@ from tensor import (
     [
         pytest.param(False, id="1SM"),
         pytest.param(True, id="2SM"),
-    ])
-def test_blackwell_group_gemm_block_scaled(problem_size, use_2sm):
+    ],
+)
+@pytest.mark.parametrize(
+    "arch",
+    [
+        pytest.param("sm100", id="sm100"),
+        pytest.param("sm103", id="sm103"),
+    ],
+)
+def test_blackwell_group_gemm_block_scaled(arch, problem_size, use_2sm):
     def ceil_div(a, b):
         return (a + b - 1) // b
 
@@ -63,8 +73,12 @@ def test_blackwell_group_gemm_block_scaled(problem_size, use_2sm):
         sub_m = int(group_sizes[idx])
         akey, asfkey, bkey, bsfkey, dkey, key = jax.random.split(key, 6)
 
-        tensor_a = create_a_tensor(1, sub_m, k, a_major, ab_dtype, akey, minval=-1.0, maxval=1.0)
-        tensor_b = create_b_tensor(1, n, k, b_major, ab_dtype, bkey, minval=1.0, maxval=1.0)
+        tensor_a = create_a_tensor(
+            1, sub_m, k, a_major, ab_dtype, akey, minval=-1.0, maxval=1.0
+        )
+        tensor_b = create_b_tensor(
+            1, n, k, b_major, ab_dtype, bkey, minval=1.0, maxval=1.0
+        )
         tensor_d = create_cd_tensor(1, sub_m, n, d_major, d_dtype, dkey, fill_value=0.0)
 
         # See https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-mma-scale-factor-a-layout-1x
@@ -72,7 +86,9 @@ def test_blackwell_group_gemm_block_scaled(problem_size, use_2sm):
         atom_mn = (32, 4)
         atom_k = 4
 
-        sfa = create_a_tensor(1, sub_m, sf_k, a_major, sf_dtype, asfkey, minval=1.0, maxval=3.0)
+        sfa = create_a_tensor(
+            1, sub_m, sf_k, a_major, sf_dtype, asfkey, minval=1.0, maxval=3.0
+        )
         sfa_ref.append(sfa)
         sfa = sfa.reshape(
             1,
@@ -84,7 +100,9 @@ def test_blackwell_group_gemm_block_scaled(problem_size, use_2sm):
         )
         sfa = sfa.transpose(0, 1, 4, 3, 2, 5)
 
-        sfb = create_b_tensor(1, n, sf_k, b_major, sf_dtype, bsfkey, minval=1.0, maxval=1.0)
+        sfb = create_b_tensor(
+            1, n, sf_k, b_major, sf_dtype, bsfkey, minval=1.0, maxval=1.0
+        )
         sfb_ref.append(sfb)
         sfb = sfb.reshape(
             1,
@@ -109,9 +127,21 @@ def test_blackwell_group_gemm_block_scaled(problem_size, use_2sm):
     tensor_d_device = jnp.concatenate([x[4] for x in tensors_abd], axis=dm_axis)
 
     # Call our kernel!
-    gemm = jax.jit(cf.blackwell_group_gemm_block_scaled, static_argnames=["use_2sm"])
+    if arch == "sm100":
+        gemm = jax.jit(
+            cf.blackwell_group_gemm_block_scaled_sm100, static_argnames=["use_2sm"]
+        )
+    else:
+        gemm = jax.jit(
+            cf.blackwell_group_gemm_block_scaled_sm103, static_argnames=["use_2sm"]
+        )
     tensor_d_device = gemm(
-        tensor_a_device, tensor_b_device, tensor_sfa_device, tensor_sfb_device, group_sizes, use_2sm=use_2sm
+        tensor_a_device,
+        tensor_b_device,
+        tensor_sfa_device,
+        tensor_sfb_device,
+        group_sizes,
+        use_2sm=use_2sm,
     )
 
     d_ref = []
@@ -129,7 +159,9 @@ def test_blackwell_group_gemm_block_scaled(problem_size, use_2sm):
                 sf_b=sfb_ref[idx],
             )
         )
-    d_ref = jax.numpy.squeeze(jnp.concatenate(d_ref, axis=dm_axis).astype(jnp.float32), 0)
+    d_ref = jax.numpy.squeeze(
+        jnp.concatenate(d_ref, axis=dm_axis).astype(jnp.float32), 0
+    )
     tensor_d_device = tensor_d_device.astype(jnp.float32)
 
     assert jnp.allclose(d_ref, tensor_d_device), "mismatch!"

@@ -18,8 +18,10 @@ template <typename T> pybind11::capsule EncapsulateFFI(T *fn) {
 
 pybind11::dict Registrations() {
   pybind11::dict dict;
-  dict["blackwell_group_gemm_block_scaled"] =
-      EncapsulateFFI(BlackwellGroupGemmBlockScaledHandler);
+  dict["blackwell_group_gemm_block_scaled_sm100"] =
+      EncapsulateFFI(BlackwellGroupGemmBlockScaledSm100Handler);
+  dict["blackwell_group_gemm_block_scaled_sm103"] =
+      EncapsulateFFI(BlackwellGroupGemmBlockScaledSm103Handler);
   return dict;
 }
 

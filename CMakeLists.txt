@@ -33,25 +33,28 @@ include_directories(${XLA_FFI_INCLUDE_DIR})
 
 set(CUTLASS_PATH "" CACHE STRING "Path to CUTLASS.")
 set(CUTLASS_ENABLE_HEADERS_ONLY ON CACHE BOOL "Enable only the header library")
+set(CUTLASS_NVCC_ARCHS "SM100;SM103")
 if (NOT CUTLASS_PATH)
   message(STATUS "No CUTLASS_PATH set; defaulting to git.")
   FetchContent_Declare(
     cutlass
     GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
-    GIT_TAG        v4.1.0
+    GIT_TAG        main # 4.2 has no tag yet
   )
   FetchContent_MakeAvailable(cutlass)
 else()
   add_subdirectory(${CUTLASS_PATH})
 endif()
 
-pybind11_add_module(cutlass_ffi_kernels src/csrc/kernels.cc src/csrc/blackwell_group_gemm_block_scaled.cu)
+pybind11_add_module(cutlass_ffi_kernels src/csrc/kernels.cc
+                                        src/csrc/blackwell_group_gemm_block_scaled_sm100.cu
+                                        src/csrc/blackwell_group_gemm_block_scaled_sm103.cu)
 target_link_libraries(cutlass_ffi_kernels PRIVATE CUDA::cudart CUDA::cuda_driver nvidia::cutlass::cutlass)
 
 list(APPEND CUTLASS_CUDA_NVCC_FLAGS --expt-relaxed-constexpr)
 list(APPEND CUTLASS_CUDA_NVCC_FLAGS -ftemplate-backtrace-limit=0)
-list(APPEND CUTLASS_CUDA_NVCC_FLAGS --gpu-architecture=compute_100a)
-list(APPEND CUTLASS_CUDA_NVCC_FLAGS --gpu-code=sm_100a,compute_100a)
+#list(APPEND CUTLASS_CUDA_NVCC_FLAGS --gpu-architecture=compute_100a,compute_103a)
+#list(APPEND CUTLASS_CUDA_NVCC_FLAGS --gpu-code=sm_100a,compute_100a,sm_103a,compute_103a)
 
 if (NOT CMAKE_BUILD_TYPE MATCHES "Release")
   list(APPEND CUTLASS_CUDA_NVCC_FLAGS -lineinfo)

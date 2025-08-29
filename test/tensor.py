@@ -83,11 +83,15 @@ def create_tensor(
 ):
     if fill_arange:
         tensor = jnp.ones(shape, dtype=dtype)
-        tensor = tensor * jnp.arange(tensor.size, dtype=tensor.dtype).reshape(tensor.shape)
+        tensor = tensor * jnp.arange(tensor.size, dtype=tensor.dtype).reshape(
+            tensor.shape
+        )
     elif fill_value is not None:
         tensor = jnp.full(shape, fill_value, dtype=dtype)
     else:
-        tensor = jax.random.uniform(key, shape, dtype=jnp.float32, minval=minval, maxval=maxval)
+        tensor = jax.random.uniform(
+            key, shape, dtype=jnp.float32, minval=minval, maxval=maxval
+        )
         tensor = tensor.astype(dtype)
     return tensor
 
@@ -189,5 +193,7 @@ def gemm_reference_einsum(
         b = b.astype(jnp.float16) * sf_b.astype(jnp.float16)
 
     return jax.jit(
-        lambda a, b: jnp.einsum(spec, a, b, preferred_element_type=acc_dtype).astype(cd_dtype)
+        lambda a, b: jnp.einsum(spec, a, b, preferred_element_type=acc_dtype).astype(
+            cd_dtype
+        )
     )(a, b)

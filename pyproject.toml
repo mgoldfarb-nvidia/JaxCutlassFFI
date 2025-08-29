@@ -14,3 +14,4 @@ build-backend = "scikit_build_core.build"
 cmake.version = ">=3.20"
 build.verbose = true
 cmake.build-type = "Release"
+cmake.define = { CMAKE_CUDA_ARCHITECTURES = "90;100a;103a" }

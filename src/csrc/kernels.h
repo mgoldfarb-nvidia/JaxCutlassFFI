@@ -19,6 +19,7 @@
 
 int32_t GetDeviceSmCount(int32_t device);
 
-XLA_FFI_DECLARE_HANDLER_SYMBOL(BlackwellGroupGemmBlockScaledHandler);
+XLA_FFI_DECLARE_HANDLER_SYMBOL(BlackwellGroupGemmBlockScaledSm100Handler);
+XLA_FFI_DECLARE_HANDLER_SYMBOL(BlackwellGroupGemmBlockScaledSm103Handler);
 
 #endif /*_CUTLASS_FFI_KERNELS_H_*/
